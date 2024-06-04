@@ -3,6 +3,9 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from ortools.sat.python import cp_model
+# Write a comment here that lists the required packages for the app
+# Required packages: streamlit, pandas, seaborn, matplotlib, ortools
+
 
 # Function to load and preprocess swim team data
 @st.cache_data
