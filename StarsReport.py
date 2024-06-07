@@ -106,9 +106,6 @@ def create_medley_relays(data):
             st.write(f"No eligible swimmers for age group {age_group}.")
             continue
 
-        #st.write(f"Eligible swimmers for age group {age_group}:")
-        #st.write(group_data)  # Debugging line to print the eligible swimmers for the age group
-
         events = strokes[age_group]
 
         # Replace NaN with 99999 for events
@@ -164,15 +161,8 @@ def create_medley_relays(data):
             status = solver.Solve(model)
 
             if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-                # st.write(f"Optimal solution found for age group {age_group} and relay {r}.")
-                # Print the total time in MM:SS format
-
-                # Write the relay number and total time to the streamlit app formatted as a header to a table
                 st.markdown(f"#### Relay {r} for age group {age_group}:")
                 st.markdown(f"##### Total time for relay {r}: {solver.ObjectiveValue():.2f} seconds")
-
-                # st.write(f"Relay {r} for age group {age_group}:")
-                # st.write(f"Total time for relay {r}: {solver.ObjectiveValue():.2f} seconds")
 
                 relay_swimmers = []
                 relay_table = pd.DataFrame(columns=['Swimmer', 'Stroke', 'Time', 'Position'])
@@ -191,20 +181,13 @@ def create_medley_relays(data):
                             elif j == 3:
                                 stroke = "Freestyle"
 
-                            # Add the swimmer to the relay table dataframe (do not use append)
                             relay_table.loc[len(relay_table)] = [f"{group_data.iloc[i]['FirstName']} {group_data.iloc[i]['LastName']}",
                                                                 stroke, group_data.iloc[i][events[j]], f"{j}"]
 
-                # Write the relay swimmers to a table
-
-                # Sort the relay table by position
                 relay_table = relay_table.sort_values(by=['Position'])
-
-                # Write the relaty table to the streamlit app (but do not render the index or the position)
                 relay_table_html = relay_table.to_html(index=False)
                 st.write(relay_table_html, unsafe_allow_html=True)
 
-                # Remove assigned swimmers from the group_data
                 group_data = group_data.drop(relay_swimmers)
 
     return relays
