@@ -100,7 +100,7 @@ def create_medley_relays(data):
         
         group_data = data[data['AgeGroup'] == age_group]
         group_data = group_data[(group_data['Roster_Status'] == 'Checked-in') & 
-                                (~group_data['InternalNotes'].isin(['No Relays']))]
+                                (~group_data['InternalNotes'].isin(['No Relays', 'No Early Relays']))]
         
         if group_data.empty:
             st.write(f"No eligible swimmers for age group {age_group}.")
