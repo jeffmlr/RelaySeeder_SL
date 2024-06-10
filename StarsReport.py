@@ -83,12 +83,12 @@ def create_medley_relays(data):
     strokes = {
         'Boys 7-8': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
         'Boys 9-10': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
-        'Boys 11-12': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
+        'Boys 11-12': ['50 Backstroke', '25 Breaststroke', '25 Butterfly', '50 Freestyle'],
         'Boys 13-14': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
         'Men 15-18': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
         'Girls 7-8': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
         'Girls 9-10': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
-        'Girls 11-12': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
+        'Girls 11-12': ['50 Backstroke', '25 Breaststroke', '25 Butterfly', '50 Freestyle'],
         'Girls 13-14': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
         'Women 15-18': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
     }
