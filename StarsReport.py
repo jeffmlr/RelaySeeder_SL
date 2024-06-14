@@ -216,6 +216,11 @@ def main():
         # Ensure the columns exist before merging
         if 'FirstName' in best_times_pivot.columns and 'LastName' in best_times_pivot.columns \
            and 'FirstName' in roster_data.columns and 'LastName' in roster_data.columns:
+            # Merge the best times and roster data on FirstName and LastName (and deal with case sensitivity issues)
+            best_times_pivot['FirstName'] = best_times_pivot['FirstName'].str.title()
+            best_times_pivot['LastName'] = best_times_pivot['LastName'].str.title()
+            roster_data['FirstName'] = roster_data['FirstName'].str.title()
+            roster_data['LastName'] = roster_data['LastName'].str.title() 
             merged_data = pd.merge(best_times_pivot, roster_data, on=['FirstName', 'LastName'], how='inner')
             
             # Rename columns to handle '_x' and '_y' suffixes
