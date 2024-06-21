@@ -225,7 +225,7 @@ def main():
             
             # Rename columns to handle '_x' and '_y' suffixes
             if 'AgeGroup_x' in merged_data.columns:
-                merged_data.rename(columns={'AgeGroup_x': 'AgeGroup'}, inplace=True)
+                merged_data.rename(columns={'AgeGroup_y': 'AgeGroup'}, inplace=True)
             
             # Preprocess the times
             events = ['25 Freestyle', '50 Freestyle', '100 Freestyle', '25 Backstroke', '50 Backstroke', 
