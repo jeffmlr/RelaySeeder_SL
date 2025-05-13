@@ -1,29 +1,13 @@
+
 import streamlit as st
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from ortools.sat.python import cp_model
-# Write a comment here that lists the required packages for the app
+
 # Required packages: streamlit, pandas, seaborn, matplotlib, ortools
 
-
-# Function to load and preprocess swim team data
-@st.cache_data
-def load_swim_data(file_path):
-    swim_team_data = pd.read_csv(file_path)
-    best_times = swim_team_data.loc[swim_team_data.groupby(['AgeGroup', 'FirstName', 'LastName', 'Event'])['ConvertedHundredths'].idxmin()]
-    best_times_pivot = best_times.pivot_table(index=['AgeGroup', 'FirstName', 'LastName'],
-                                              columns='Event',
-                                              values='Time',
-                                              aggfunc='first').reset_index()
-    return best_times_pivot
-
-# Function to load and preprocess roster data
-@st.cache_data
-def load_roster_data(file_path):
-    return pd.read_csv(file_path)
-
-# Function to convert time strings to numeric
+# Helper functions
 def convert_time_to_numeric(time_str):
     if pd.isna(time_str):
         return None
@@ -34,267 +18,170 @@ def convert_time_to_numeric(time_str):
     else:
         return float(time_str)
 
-# Function to create bar plots for each event
+def estimate_50_time_from_25_with_flag(time_25):
+    if pd.isna(time_25) or time_25 <= 0:
+        return None, False
+    return round(2 * time_25 + 2, 2), True
+
+def fill_missing_50_times_with_flag(df):
+    age_filter = df['AgeGroup'].str.contains('11-12', case=False, na=False)
+
+    event_pairs = [
+        ('25 Freestyle', '50 Freestyle'),
+        ('25 Backstroke', '50 Backstroke'),
+        ('25 Breaststroke', '50 Breaststroke'),
+        ('25 Butterfly', '50 Butterfly')
+    ]
+
+    for _, long_event in event_pairs:
+        df[f"{long_event} Estimated"] = False
+
+    for short_event, long_event in event_pairs:
+        estimate_mask = age_filter & df[long_event].isna() & df[short_event].notna()
+        estimated_values = df.loc[estimate_mask, short_event].apply(estimate_50_time_from_25_with_flag)
+
+        df.loc[estimate_mask, long_event] = estimated_values.apply(lambda x: x[0])
+        df.loc[estimate_mask, f"{long_event} Estimated"] = estimated_values.apply(lambda x: x[1])
+
+    return df
+
+@st.cache_data
+def load_swim_data(file_path):
+    swim_team_data = pd.read_csv(file_path)
+    best_times = swim_team_data.loc[swim_team_data.groupby(['AgeGroup', 'FirstName', 'LastName', 'Event'])['ConvertedHundredths'].idxmin()]
+    best_times_pivot = best_times.pivot_table(index=['AgeGroup', 'FirstName', 'LastName'],
+                                              columns='Event',
+                                              values='Time',
+                                              aggfunc='first').reset_index()
+    return best_times_pivot
+
+@st.cache_data
+def load_roster_data(file_path):
+    return pd.read_csv(file_path)
+
 def plot_best_times(data, event_name):
-    # Include times for the selected event and swimmer information
     plt.figure(figsize=(12, 6))
     event_data = data[['AgeGroup', 'FirstName', 'LastName', event_name]].dropna()
     event_data['Swimmer'] = event_data['FirstName'] + ' ' + event_data['LastName'] + ' (' + event_data['AgeGroup'] + ')'
-    event_data = event_data.sort_values(by=event_name)  # Sort by the selected event times
+    event_data = event_data.sort_values(by=event_name)
     plt.title(f'Best Times for {event_name}')
     plt.xlabel('Time (seconds)')
     plt.ylabel('Swimmer')
-    # Add data points on each bar
     plt.bar_label(plt.barh(event_data['Swimmer'], event_data[event_name]))
     sns.barplot(x=event_name, y='Swimmer', data=event_data, palette='viridis')
     st.pyplot(plt)
     plt.clf()
 
-# Function to create freestyle relays
-def create_freestyle_relays(data, event_name):
-    relays = {}
-    age_groups = data['AgeGroup'].unique()
-    for age_group in age_groups:
-        group_data = data[data['AgeGroup'] == age_group].dropna(subset=[event_name])
-        group_data = group_data[(group_data['Roster_Status'] == 'Checked-in') & 
-                                (~group_data['InternalNotes'].isin(['No Relays', 'No Late Relays']))]
-        if not group_data.empty:
-            group_data = group_data.sort_values(by=event_name)
-            relays[age_group] = []
-            for i in range(0, len(group_data), 4):
-                relay = group_data.iloc[i:i+4]
-                if len(relay) == 4:
-                    # Assign swimmers to positions in the relay
-                    relay_order = [relay.iloc[1], relay.iloc[2], relay.iloc[3], relay.iloc[0]]
-                    relay_positions = ['First', 'Second', 'Third', 'Fourth']
-                    relay_df = pd.DataFrame({
-                        'Position': relay_positions,
-                        'Swimmer': [f"{row['FirstName']} {row['LastName']}" for row in relay_order],
-                        'Time': [row[event_name] for row in relay_order]
-                    })
-                    relays[age_group].append(relay_df)
-    return relays
-
-# Function to create medley relays using OR-Tools
 def create_medley_relays(data):
     relays = {}
     age_groups = data['AgeGroup'].unique()
-    st.write("Detected Age Groups: ", age_groups)  # Debugging line to print detected age groups
     strokes = {
-        'Boys 7-8': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
-        'Boys 9-10': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
         'Boys 11-12': ['50 Backstroke', '25 Breaststroke', '25 Butterfly', '50 Freestyle'],
-        'Boys 13-14': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
-        'Men 15-18': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
-        'Girls 7-8': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
-        'Girls 9-10': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
         'Girls 11-12': ['50 Backstroke', '25 Breaststroke', '25 Butterfly', '50 Freestyle'],
-        'Girls 13-14': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
-        'Women 15-18': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
     }
 
     for age_group in age_groups:
         if age_group not in strokes:
-            st.write(f"Skipping age group {age_group} because it is not in the specified stroke categories.")
             continue
-        
         group_data = data[data['AgeGroup'] == age_group]
-        group_data = group_data[(group_data['Roster_Status'] == 'Checked-in') & 
+        group_data = group_data[(group_data['Roster_Status'] == 'Checked-in') &
                                 (~group_data['InternalNotes'].isin(['No Relays', 'No Early Relays']))]
-        
-        if group_data.empty:
-            st.write(f"No eligible swimmers for age group {age_group}.")
+        if group_data.empty or len(group_data) < 4:
             continue
-
         events = strokes[age_group]
-
-        # Replace NaN with 99999 for events
         for event in events:
             group_data[event].fillna(99999, inplace=True)
-
-        st.write(f"Swimmers with valid times for age group {age_group}:")
-        st.write(group_data)  # Debugging line to print the swimmers with valid times for the age group
-        
-        if len(group_data) < 4:
-            st.write(f"Not enough swimmers with valid times for age group {age_group}.")
-            continue
-        
-        # Determine the maximum number of relays that can be created
         max_relays = len(group_data) // 4
-        st.write(f"Maximum number of relays for age group {age_group}: {max_relays}")
-
         num_relay_legs = 4
-
         for r in range(1, max_relays + 1):
-            # Create the model
             model = cp_model.CpModel()
-
-            # Create or reset the variables
             num_swimmers = len(group_data)
-
-            x = []
-            for i in range(num_swimmers):
-                t = []
-                for j in range(num_relay_legs):
-                    t.append(model.NewBoolVar(f'x_{i}_{j}'))
-                x.append(t)
-
-            # Create the constraints
+            x = [[model.NewBoolVar(f'x_{i}_{j}') for j in range(num_relay_legs)] for i in range(num_swimmers)]
             for i in range(num_swimmers):
                 model.AddAtMostOne(x[i][j] for j in range(num_relay_legs))
-
             for j in range(num_relay_legs):
                 model.AddExactlyOne(x[i][j] for i in range(num_swimmers))
-
             for i in range(num_swimmers):
                 for j in range(4):
                     if group_data.iloc[i][events[j]] == 99999:
                         model.Add(x[i][j] == 0)
-
-            objective_terms = []
-            for i in range(num_swimmers):
-                for j in range(num_relay_legs):
-                    objective_terms.append(x[i][j] * group_data.iloc[i][events[j]])
+            objective_terms = [x[i][j] * group_data.iloc[i][events[j]] for i in range(num_swimmers) for j in range(num_relay_legs)]
             model.Minimize(sum(objective_terms))
-
             solver = cp_model.CpSolver()
             status = solver.Solve(model)
-
             if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-                st.markdown(f"#### Relay {r} for age group {age_group}:")
-                st.markdown(f"##### Total time for relay {r}: {solver.ObjectiveValue():.2f} seconds")
-
-                relay_swimmers = []
-                relay_table = pd.DataFrame(columns=['Swimmer', 'Stroke', 'Time', 'Position'])
-
+                st.markdown(f"#### Relay {r} for age group {age_group}")
+                st.markdown(f"##### Total time: {solver.ObjectiveValue():.2f} seconds")
+                relay_table = pd.DataFrame(columns=['Swimmer', 'Stroke', 'Time', 'Estimated', 'Position'])
                 for i in range(num_swimmers):
                     for j in range(num_relay_legs):
                         if solver.BooleanValue(x[i][j]):
-                            relay_swimmers.append(group_data.index[i])
-                            
-                            if j == 0:
-                                stroke = "Backstroke"
-                            elif j == 1:
-                                stroke = "Breaststroke"
-                            elif j == 2:
-                                stroke = "Butterfly"
-                            elif j == 3:
-                                stroke = "Freestyle"
-
-                            relay_table.loc[len(relay_table)] = [f"{group_data.iloc[i]['FirstName']} {group_data.iloc[i]['LastName']}",
-                                                                stroke, group_data.iloc[i][events[j]], f"{j}"]
-
+                            stroke = ['Backstroke', 'Breaststroke', 'Butterfly', 'Freestyle'][j]
+                            est_flag_col = f"{events[j]} Estimated"
+                            is_estimated = group_data.iloc[i][est_flag_col] if est_flag_col in group_data.columns else False
+                            relay_table.loc[len(relay_table)] = [
+                                f"{group_data.iloc[i]['FirstName']} {group_data.iloc[i]['LastName']}",
+                                stroke,
+                                group_data.iloc[i][events[j]],
+                                "✅" if is_estimated else "",
+                                f"{j}"
+                            ]
                 relay_table = relay_table.sort_values(by=['Position'])
-                relay_table_html = relay_table.to_html(index=False)
-                st.write(relay_table_html, unsafe_allow_html=True)
-
-                group_data = group_data.drop(relay_swimmers)
+                st.write(relay_table.drop(columns=["Position"]))
 
     return relays
 
-# Streamlit app
 def main():
     st.title("Steiner Stars Relay Seeder")
-
-    st.markdown("""
-    ### Upload Files
-    Please upload the best times data and roster data files in CSV format.
-    """)
-
-    # File upload for swim team data
     swim_file = st.file_uploader("Choose a CSV file with best times data", type="csv")
-    # File upload for roster data
     roster_file = st.file_uploader("Choose a CSV file with roster data", type="csv")
-    
+
     if swim_file is not None and roster_file is not None:
         best_times_pivot = load_swim_data(swim_file)
         roster_data = load_roster_data(roster_file)
 
-        # Rename roster columns to match swim team data for merging
         roster_data.rename(columns={'AthleteFirstName': 'FirstName', 'AthleteLastName': 'LastName'}, inplace=True)
 
-        # Ensure the columns exist before merging
-        if 'FirstName' in best_times_pivot.columns and 'LastName' in best_times_pivot.columns \
-           and 'FirstName' in roster_data.columns and 'LastName' in roster_data.columns:
-            # Merge the best times and roster data on FirstName and LastName (and deal with case sensitivity issues)
-            best_times_pivot['FirstName'] = best_times_pivot['FirstName'].str.title()
-            best_times_pivot['LastName'] = best_times_pivot['LastName'].str.title()
-            roster_data['FirstName'] = roster_data['FirstName'].str.title()
-            roster_data['LastName'] = roster_data['LastName'].str.title() 
-            merged_data = pd.merge(best_times_pivot, roster_data, on=['FirstName', 'LastName'], how='inner')
-            
-            # Rename columns to handle '_x' and '_y' suffixes
-            if 'AgeGroup_x' in merged_data.columns:
-                merged_data.rename(columns={'AgeGroup_y': 'AgeGroup'}, inplace=True)
-            
-            # Preprocess the times
-            events = ['25 Freestyle', '50 Freestyle', '100 Freestyle', '25 Backstroke', '50 Backstroke', 
-                      '25 Breaststroke', '50 Breaststroke', '25 Butterfly', '50 Butterfly', '100 Individual Medley']
-            best_times_pivot_clean = merged_data.copy()
-            for event in events:
-                best_times_pivot_clean[event] = best_times_pivot_clean[event].apply(convert_time_to_numeric)
+        best_times_pivot['FirstName'] = best_times_pivot['FirstName'].str.title()
+        best_times_pivot['LastName'] = best_times_pivot['LastName'].str.title()
+        roster_data['FirstName'] = roster_data['FirstName'].str.title()
+        roster_data['LastName'] = roster_data['LastName'].str.title()
 
-            # Select age group
-            if 'AgeGroup' in best_times_pivot_clean.columns:
-                age_groups = best_times_pivot_clean['AgeGroup'].unique()
-                selected_age_group = st.selectbox("Select Age Group", age_groups)
-                filtered_data = best_times_pivot_clean[best_times_pivot_clean['AgeGroup'] == selected_age_group]
+        merged_data = pd.merge(best_times_pivot, roster_data, on=['FirstName', 'LastName'], how='inner')
+        if 'AgeGroup_x' in merged_data.columns:
+            merged_data.rename(columns={'AgeGroup_y': 'AgeGroup'}, inplace=True)
 
-                # Check if InternalNotes and Roster_Status columns exist
-                if 'InternalNotes' in filtered_data.columns and 'Roster_Status' in filtered_data.columns:
-                    # Replace NaN in InternalNotes with 'No Restrictions'
-                    filtered_data['InternalNotes'].fillna('No Restrictions', inplace=True)
-                    
-                    st.markdown("### Filter Internal Notes and Roster Status")
+        events = ['25 Freestyle', '50 Freestyle', '100 Freestyle', '25 Backstroke', '50 Backstroke',
+                  '25 Breaststroke', '50 Breaststroke', '25 Butterfly', '50 Butterfly', '100 Individual Medley']
+        best_times_pivot_clean = merged_data.copy()
+        for event in events:
+            best_times_pivot_clean[event] = best_times_pivot_clean[event].apply(convert_time_to_numeric)
 
-                    # Multi-select for InternalNotes
-                    internal_notes = filtered_data['InternalNotes'].unique()
-                    selected_internal_notes = st.multiselect("Select Internal Notes", internal_notes, default=internal_notes)
-                    filtered_data = filtered_data[filtered_data['InternalNotes'].isin(selected_internal_notes)]
+        best_times_pivot_clean = fill_missing_50_times_with_flag(best_times_pivot_clean)
 
-                    # Select for Roster_Status
-                    roster_statuses = filtered_data['Roster_Status'].unique()
-                    selected_roster_status = st.selectbox("Select Roster Status", roster_statuses)
-                    filtered_data = filtered_data[filtered_data['Roster_Status'] == selected_roster_status]
+        if 'AgeGroup' in best_times_pivot_clean.columns:
+            age_groups = best_times_pivot_clean['AgeGroup'].unique()
+            selected_age_group = st.selectbox("Select Age Group", age_groups)
+            filtered_data = best_times_pivot_clean[best_times_pivot_clean['AgeGroup'] == selected_age_group]
 
-                    st.markdown("### Edit Internal Notes and Roster Status")
+            if 'InternalNotes' in filtered_data.columns and 'Roster_Status' in filtered_data.columns:
+                filtered_data['InternalNotes'].fillna('No Restrictions', inplace=True)
+                internal_notes = filtered_data['InternalNotes'].unique()
+                selected_internal_notes = st.multiselect("Select Internal Notes", internal_notes, default=internal_notes)
+                filtered_data = filtered_data[filtered_data['InternalNotes'].isin(selected_internal_notes)]
+                roster_statuses = filtered_data['Roster_Status'].unique()
+                selected_roster_status = st.selectbox("Select Roster Status", roster_statuses)
+                filtered_data = filtered_data[filtered_data['Roster_Status'] == selected_roster_status]
+                edited_data = st.data_editor(filtered_data, num_rows="dynamic")
+                event_name = st.selectbox("Select Event", events)
+                plot_best_times(edited_data, event_name)
 
-                    # Editable table
-                    edited_data = st.data_editor(filtered_data, num_rows="dynamic")
-
-                    # Select event
-                    event_name = st.selectbox("Select Event", events)
-                    plot_best_times(edited_data, event_name)
-
-                    # Create Free Relays Button
-                    if st.button("Create Free Relays"):
-                        relays = create_freestyle_relays(edited_data, event_name)
-                        for age_group, relay_teams in relays.items():
-                            st.markdown(f"#### {age_group} Freestyle Relays")
-                            for idx, relay in enumerate(relay_teams, start=1):
-                                st.markdown(f"**Relay {idx}**")
-                                relay_html = relay.to_html(index=False, justify="left", border=0)
-                                st.markdown(relay_html, unsafe_allow_html=True)
-
-                    # Create Medley Relays Button
-                    if st.button("Create Medley Relays"):
-                        st.write("Medley Relays Button Clicked")
-                        relays = create_medley_relays(edited_data)
-                        if not relays:
-                            st.write("No medley relays could be created.")
-                        for age_group, relay_teams in relays.items():
-                            st.markdown(f"#### {age_group} Medley Relays")
-                            for idx, relay in enumerate(relay_teams, start=1):
-                                st.markdown(f"**Relay {idx}**")
-                                relay_html = relay.to_html(index=False, justify="left", border=0)
-                                st.markdown(relay_html, unsafe_allow_html=True)
-
-                else:
-                    st.error("The required columns 'InternalNotes' and/or 'Roster_Status' are not present in the merged data.")
-            else:
-                st.error("The required column 'AgeGroup' is not present in the merged data.")
+                if st.button("Create Medley Relays"):
+                    relays = create_medley_relays(edited_data)
+                    if not relays:
+                        st.write("No medley relays could be created.")
         else:
-            st.error("The required columns 'FirstName' and 'LastName' are not present in one or both of the uploaded files.")
+            st.error("Missing 'AgeGroup' in merged data.")
 
 if __name__ == "__main__":
     main()
