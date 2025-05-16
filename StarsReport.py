@@ -23,7 +23,12 @@ def estimate_50_time_from_25_with_flag(time_25):
     return round(2 * time_25 + 2, 2), True
 
 def fill_missing_50_times_with_flag(df):
-    age_filter = df['AgeGroup'].str.contains('11-12', case=False, na=False)
+    # Create age group filters
+    age_filters = {
+        '11-12': df['AgeGroup'].str.contains('11-12', case=False, na=False),
+        '13-14': df['AgeGroup'].str.contains('13-14', case=False, na=False),
+        '15-18': df['AgeGroup'].str.contains('15-18', case=False, na=False)
+    }
 
     event_pairs = [
         ('25 Freestyle', '50 Freestyle'),
@@ -32,15 +37,18 @@ def fill_missing_50_times_with_flag(df):
         ('25 Butterfly', '50 Butterfly')
     ]
 
+    # Initialize estimation flags for all 50-yard events
     for _, long_event in event_pairs:
         df[f"{long_event} Estimated"] = False
 
-    for short_event, long_event in event_pairs:
-        estimate_mask = age_filter & df[long_event].isna() & df[short_event].notna()
-        estimated_values = df.loc[estimate_mask, short_event].apply(estimate_50_time_from_25_with_flag)
+    # Process each age group
+    for age_group, age_filter in age_filters.items():
+        for short_event, long_event in event_pairs:
+            estimate_mask = age_filter & df[long_event].isna() & df[short_event].notna()
+            estimated_values = df.loc[estimate_mask, short_event].apply(estimate_50_time_from_25_with_flag)
 
-        df.loc[estimate_mask, long_event] = estimated_values.apply(lambda x: x[0])
-        df.loc[estimate_mask, f"{long_event} Estimated"] = estimated_values.apply(lambda x: x[1])
+            df.loc[estimate_mask, long_event] = estimated_values.apply(lambda x: x[0])
+            df.loc[estimate_mask, f"{long_event} Estimated"] = estimated_values.apply(lambda x: x[1])
 
     return df
 
