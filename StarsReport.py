@@ -90,7 +90,7 @@ def create_medley_relays(data):
     for age_group in age_groups:
         if age_group not in strokes:
             continue
-        group_data = data[data['AgeGroup'] == age_group]
+        group_data = data[data['AgeGroup'] == age_group].copy()  # Make a copy to avoid modifying the original
         group_data = group_data[(group_data['Roster_Status'] == 'Checked-in') &
                                 (~group_data['InternalNotes'].isin(['No Relays', 'No Early Relays']))]
         if group_data.empty or len(group_data) < 4:
@@ -101,6 +101,9 @@ def create_medley_relays(data):
         max_relays = len(group_data) // 4
         num_relay_legs = 4
         for r in range(1, max_relays + 1):
+            if len(group_data) < 4:  # Check if we have enough swimmers left
+                break
+                
             model = cp_model.CpModel()
             num_swimmers = len(group_data)
             x = [[model.NewBoolVar(f'x_{i}_{j}') for j in range(num_relay_legs)] for i in range(num_swimmers)]
@@ -120,6 +123,8 @@ def create_medley_relays(data):
                 st.markdown(f"#### Relay {r} for age group {age_group}")
                 st.markdown(f"##### Total time: {solver.ObjectiveValue():.2f} seconds")
                 relay_table = pd.DataFrame(columns=['Swimmer', 'Stroke', 'Time', 'Estimated', 'Position'])
+                selected_swimmers = []  # Keep track of selected swimmers
+                
                 for i in range(num_swimmers):
                     for j in range(num_relay_legs):
                         if solver.BooleanValue(x[i][j]):
@@ -133,8 +138,13 @@ def create_medley_relays(data):
                                 "✅" if is_estimated else "",
                                 f"{j}"
                             ]
+                            selected_swimmers.append(i)  # Add selected swimmer index
+                
                 relay_table = relay_table.sort_values(by=['Position'])
                 st.write(relay_table.drop(columns=["Position"]))
+                
+                # Remove selected swimmers from group_data
+                group_data = group_data.drop(group_data.index[selected_swimmers])
 
     return relays
 
