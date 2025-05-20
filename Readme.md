@@ -123,15 +123,6 @@ The optimizer follows these key rules and constraints:
 
 ---
 
-## ✅ Future Improvements
-
-- Export relays to CSV.
-- Support for freestyle relays.
-- Team-level strategy insights (e.g., overlap checks, heat distributions).
-- Enhanced UI with swimmer photos and bios.
-
----
-
 ## 📄 License
 
 MIT License. See [LICENSE](LICENSE) for details.
