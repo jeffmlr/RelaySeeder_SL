@@ -22,7 +22,12 @@ def estimate_50_time_from_25_with_flag(time_25):
         return None, False
     return round(2 * time_25 + 2, 2), True
 
-def fill_missing_50_times_with_flag(df):
+def estimate_25_time_from_50_with_flag(time_50):
+    if pd.isna(time_50) or time_50 <= 0:
+        return None, False
+    return round((time_50 - 2) / 2, 2), True
+
+def fill_missing_event_times_with_flag(df, direction='25->50'):
     # Create age group filters
     age_filters = {
         '11-12': df['AgeGroup'].str.contains('11-12', case=False, na=False),
@@ -37,20 +42,34 @@ def fill_missing_50_times_with_flag(df):
         ('25 Butterfly', '50 Butterfly')
     ]
 
-    # Initialize estimation flags for all 50-yard events
-    for _, long_event in event_pairs:
-        df[f"{long_event} Estimated"] = False
+    # Initialize estimation flags for all events
+    for short_event, long_event in event_pairs:
+        if direction == '25->50':
+            df[f"{long_event} Estimated"] = False
+        else:
+            df[f"{short_event} Estimated"] = False
 
     # Process each age group
     for age_group, age_filter in age_filters.items():
         for short_event, long_event in event_pairs:
-            estimate_mask = age_filter & df[long_event].isna() & df[short_event].notna()
-            estimated_values = df.loc[estimate_mask, short_event].apply(estimate_50_time_from_25_with_flag)
-
-            df.loc[estimate_mask, long_event] = estimated_values.apply(lambda x: x[0])
-            df.loc[estimate_mask, f"{long_event} Estimated"] = estimated_values.apply(lambda x: x[1])
+            if direction == '25->50':
+                estimate_mask = age_filter & df[long_event].isna() & df[short_event].notna()
+                estimated_values = df.loc[estimate_mask, short_event].apply(estimate_50_time_from_25_with_flag)
+                df.loc[estimate_mask, long_event] = estimated_values.apply(lambda x: x[0])
+                df.loc[estimate_mask, f"{long_event} Estimated"] = estimated_values.apply(lambda x: x[1])
+            else:  # 50->25
+                estimate_mask = age_filter & df[short_event].isna() & df[long_event].notna()
+                estimated_values = df.loc[estimate_mask, long_event].apply(estimate_25_time_from_50_with_flag)
+                df.loc[estimate_mask, short_event] = estimated_values.apply(lambda x: x[0])
+                df.loc[estimate_mask, f"{short_event} Estimated"] = estimated_values.apply(lambda x: x[1])
 
     return df
+
+def get_stroke_events_for_age_group(age_group):
+    if '13-14' in age_group or '15-18' in age_group:
+        return ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle']
+    else:  # 11-12 and below
+        return ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle']
 
 @st.cache_data
 def load_swim_data(file_path):
@@ -82,39 +101,37 @@ def plot_best_times(data, event_name):
 def create_medley_relays(data):
     relays = {}
     age_groups = data['AgeGroup'].unique()
-    strokes = {
-        'Boys 7-8': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
-        'Boys 9-10': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
-        'Boys 11-12': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
-        'Boys 13-14': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
-        'Men 15-18': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
-        'Girls 7-8': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
-        'Girls 9-10': ['25 Backstroke', '25 Breaststroke', '25 Butterfly', '25 Freestyle'],
-        'Girls 11-12': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
-        'Girls 13-14': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
-        'Women 15-18': ['50 Backstroke', '50 Breaststroke', '50 Butterfly', '50 Freestyle'],
-    }
-
+    
     for age_group in age_groups:
-        if age_group not in strokes:
-            continue
-        group_data = data[data['AgeGroup'] == age_group].copy()  # Make a copy to avoid modifying the original
+        group_data = data[data['AgeGroup'] == age_group].copy()
         group_data = group_data[(group_data['Roster_Status'] == 'Checked-in') &
-                                (~group_data['InternalNotes'].isin(['No Relays', 'No Early Relays']))]
+                              (~group_data['InternalNotes'].isin(['No Relays', 'No Early Relays']))]
+        
         if group_data.empty or len(group_data) < 4:
             continue
-        events = strokes[age_group]
+            
+        events = get_stroke_events_for_age_group(age_group)
+        
+        # Fill missing times based on age group
+        if '13-14' in age_group or '15-18' in age_group:
+            group_data = fill_missing_event_times_with_flag(group_data, direction='25->50')
+        else:  # 11-12 and below
+            group_data = fill_missing_event_times_with_flag(group_data, direction='50->25')
+            
         for event in events:
             group_data[event].fillna(99999, inplace=True)
+            
         max_relays = len(group_data) // 4
         num_relay_legs = 4
+        
         for r in range(1, max_relays + 1):
-            if len(group_data) < 4:  # Check if we have enough swimmers left
+            if len(group_data) < 4:
                 break
                 
             model = cp_model.CpModel()
             num_swimmers = len(group_data)
             x = [[model.NewBoolVar(f'x_{i}_{j}') for j in range(num_relay_legs)] for i in range(num_swimmers)]
+            
             for i in range(num_swimmers):
                 model.AddAtMostOne(x[i][j] for j in range(num_relay_legs))
             for j in range(num_relay_legs):
@@ -123,15 +140,18 @@ def create_medley_relays(data):
                 for j in range(4):
                     if group_data.iloc[i][events[j]] == 99999:
                         model.Add(x[i][j] == 0)
+                        
             objective_terms = [x[i][j] * group_data.iloc[i][events[j]] for i in range(num_swimmers) for j in range(num_relay_legs)]
             model.Minimize(sum(objective_terms))
+            
             solver = cp_model.CpSolver()
             status = solver.Solve(model)
+            
             if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 st.markdown(f"#### Relay {r} for age group {age_group}")
                 st.markdown(f"##### Total time: {solver.ObjectiveValue():.2f} seconds")
                 relay_table = pd.DataFrame(columns=['Swimmer', 'Stroke', 'Time', 'Estimated', 'Position'])
-                selected_swimmers = []  # Keep track of selected swimmers
+                selected_swimmers = []
                 
                 for i in range(num_swimmers):
                     for j in range(num_relay_legs):
@@ -146,12 +166,11 @@ def create_medley_relays(data):
                                 "✅" if is_estimated else "",
                                 f"{j}"
                             ]
-                            selected_swimmers.append(i)  # Add selected swimmer index
+                            selected_swimmers.append(i)
                 
                 relay_table = relay_table.sort_values(by=['Position'])
                 st.write(relay_table.drop(columns=["Position"]))
                 
-                # Remove selected swimmers from group_data
                 group_data = group_data.drop(group_data.index[selected_swimmers])
 
     return relays
@@ -182,7 +201,7 @@ def main():
         for event in events:
             best_times_pivot_clean[event] = best_times_pivot_clean[event].apply(convert_time_to_numeric)
 
-        best_times_pivot_clean = fill_missing_50_times_with_flag(best_times_pivot_clean)
+        best_times_pivot_clean = fill_missing_event_times_with_flag(best_times_pivot_clean)
 
         if 'AgeGroup' in best_times_pivot_clean.columns:
             age_groups = best_times_pivot_clean['AgeGroup'].unique()
