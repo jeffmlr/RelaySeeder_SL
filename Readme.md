@@ -90,6 +90,37 @@ The medley relay generation uses:
 - **Constraints** ensuring each stroke is swum exactly once and no swimmer appears more than once per relay.
 - **Objective function** minimizing total relay time using available swimmer data.
 
+## 🔍 Medley Relay Optimizer Details
+
+The optimizer follows these key rules and constraints:
+
+### Swimmer Eligibility
+- Only swimmers with a "Checked-in" roster status are considered for relay selection
+- Swimmers must have valid times for their assigned stroke, or have a basis for estimation (25yd if they are 11+ to estimate 50yd)
+- No restrictions on early relay participation (swimmers can be assigned to multiple relays)
+
+### Stroke Order
+- Medley relays follow the standard order: Backstroke → Breaststroke → Butterfly → Freestyle
+- Each swimmer can only be assigned to one stroke per relay
+- Each stroke must be assigned exactly once per relay
+
+### Time Handling
+- Uses actual times when available
+- Automatically estimates missing 50-yard times from 25-yard performances
+- Estimated times are clearly marked in the output
+- All times are converted to a common format for comparison
+
+### Optimization Goals
+- Minimizes total relay time while respecting all constraints
+- Balances speed across all four strokes
+- Considers both actual and estimated times in calculations
+
+### Output Format
+- Displays complete relay lineups with stroke assignments
+- Shows individual times for each swimmer
+- Flags estimated times with an asterisk (*)
+- Provides total relay time for each combination
+
 ---
 
 ## ✅ Future Improvements
